@@ -1,0 +1,89 @@
+name: Android
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Um build por vez: o APK publicado é sempre o do último envio.
+concurrency:
+  group: android-release
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+      # Mantém a mesma chave de assinatura em todos os builds, para o APK
+      # poder ser instalado por cima da versão anterior. A chave é criada uma vez
+      # e fica guardada no cache do Actions (nunca no repositório).
+      - name: Restaurar chave de assinatura
+        uses: actions/cache@v4
+        with:
+          path: ~/dominog-chave
+          key: dominogjieshu-chave-assinatura-v1
+      - name: Criar chave de assinatura (só na primeira vez)
+        run: |
+          mkdir -p ~/dominog-chave
+          if [ ! -f ~/dominog-chave/chave.jks ]; then
+            head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' > ~/dominog-chave/senha.txt
+            keytool -genkeypair -keystore ~/dominog-chave/chave.jks -alias dominog \
+              -storepass "$(cat ~/dominog-chave/senha.txt)" -keypass "$(cat ~/dominog-chave/senha.txt)" \
+              -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Domino Jieshuo G, C=BR"
+          fi
+          echo "::add-mask::$(cat ~/dominog-chave/senha.txt)"
+          echo "DOMINOG_KEYSTORE=$HOME/dominog-chave/chave.jks" >> "$GITHUB_ENV"
+          echo "DOMINOG_KEYSTORE_PASS=$(cat ~/dominog-chave/senha.txt)" >> "$GITHUB_ENV"
+      - name: Testes e build
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon testDebugUnitTest assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk DominoJieshuoG.apk
+          echo "$GITHUB_RUN_NUMBER" > version.txt
+          # Novidades = todas as mudanças desde a versão publicada anterior (sem ajustes internos "Build:")
+          PREV=$(curl -sfL https://github.com/${{ github.repository }}/releases/download/ultima-versao/commit.txt || true)
+          if [ -n "$PREV" ] && git cat-file -e "$PREV^{commit}" 2>/dev/null; then RANGE="$PREV..HEAD"; else RANGE="-1"; fi
+          git log $RANGE --no-merges --invert-grep --grep='^Build:' --pretty='%B' \
+            | grep -v -E '^(Co-Authored-By|Claude-Session):' | cat -s > novidades.txt
+          [ -s novidades.txt ] || echo "Melhorias internas." > novidades.txt
+          git rev-parse HEAD > commit.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DominoJieshuoG-apk
+          path: DominoJieshuoG.apk
+      - name: Publicar APK na página de Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ultima-versao
+          name: Dominó Jieshuo G (última versão)
+          prerelease: true
+          make_latest: false
+          target_commitish: ${{ github.sha }}
+          body: "APK gerado automaticamente do commit ${{ github.sha }}. Baixe DominoJieshuoG.apk e instale no celular."
+          files: |
+            DominoJieshuoG.apk
+            version.txt
+            novidades.txt
+            commit.txt
+      # Guarda também cada versão numa publicação própria (o link da última versão não muda).
+      - name: Guardar esta versão (histórico)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Dominó Jieshuo G 1.0.${{ github.run_number }}
+          prerelease: false
+          make_latest: false
+          target_commitish: ${{ github.sha }}
+          body_path: novidades.txt
+          files: |
+            DominoJieshuoG.apk
