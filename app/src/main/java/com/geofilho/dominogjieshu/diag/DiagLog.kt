@@ -74,6 +74,16 @@ object DiagLog {
             }.getOrDefault("")
         }
         val cls = e.className?.toString()?.substringAfterLast('.').orEmpty()
-        add("A11Y", "$type \"${text.take(120)}\" ($cls)")
+        // Item sem nome recebendo foco: anota detalhes para descobrir qual é (id, posição, filhos).
+        var extra = ""
+        if (text.isBlank() && e.eventType == AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED) {
+            extra = runCatching {
+                val n = e.source ?: return@runCatching " [sem detalhes]"
+                val r = android.graphics.Rect().also { n.getBoundsInScreen(it) }
+                val id = n.viewIdResourceName?.substringAfterLast('/') ?: "-"
+                " [id=$id, posição=${r.left},${r.top}-${r.right},${r.bottom}, filhos=${n.childCount}, clicável=${n.isClickable}]"
+            }.getOrDefault("")
+        }
+        add("A11Y", "$type \"${text.take(120)}\" ($cls)$extra")
     }
 }

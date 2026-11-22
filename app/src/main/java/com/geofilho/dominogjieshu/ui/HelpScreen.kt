@@ -131,6 +131,11 @@ private fun helpBlocks(version: String): List<Block> {
                 "procurar na tela. O foco só muda depois que a voz do jogo termina de falar.",
         ),
         p(
+            "Diferença desta versão: o Jieshuo às vezes move o foco sozinho quando a tela muda. Para o foco não " +
+                "ficar pulando de um lado para o outro, o jogo pede o foco uma vez só e não insiste. Se o foco " +
+                "parar em outro lugar, deslize para achar o item, ou toque em Ouvir mesa.",
+        ),
+        p(
             "1. Começo da rodada: a voz avisa quem começa e o foco desce para o título Suas pedras. Basta deslizar " +
                 "da esquerda para a direita para ir lendo as suas pedras, uma por uma.",
         ),

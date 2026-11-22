@@ -494,41 +494,33 @@ private fun isA11yFocused(v: android.view.View) =
     runCatching { v.createAccessibilityNodeInfo().isAccessibilityFocused }.getOrDefault(false)
 
 /**
- * Põe o foco do TalkBack numa view nativa (ACTION_ACCESSIBILITY_FOCUS), tentando algumas vezes
- * porque o TalkBack às vezes ainda está terminando de falar. Devolve true se o foco ficou nela.
+ * Põe o foco do Jieshuo (解说) numa view nativa (ACTION_ACCESSIBILITY_FOCUS) UMA vez só.
+ *
+ * Diferente da versão TalkBack: o Jieshuo também move o foco sozinho logo depois que o
+ * conteúdo da tela muda. No relatório do Wagner, o app tentava de novo e o Jieshuo tirava de
+ * novo (para um item sem nome), e os dois ficavam brigando: o foco pulava de um lado para o
+ * outro e a fala era cortada. Aqui o app espera a tela assentar, pede o foco uma vez e, se o
+ * Jieshuo levar o foco para outro lugar, NÃO insiste — só anota no diagnóstico.
  */
 private suspend fun focusNative(v: android.view.View, what: String): Boolean {
     val log = com.geofilho.dominogjieshu.diag.DiagLog
-    fun now() = android.os.SystemClock.uptimeMillis()
-    var got = false
-    for ((i, wait) in listOf(250L, 700L, 1200L).withIndex()) {
-        kotlinx.coroutines.delay(wait)
-        if (isA11yFocused(v)) { DiagLogBridge.add("$what já está com o foco"); got = true; break }
-        val ok = v.performAccessibilityAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS, null)
-        DiagLogBridge.add("tentativa ${i + 1} de focar $what: aceita=$ok, na tela=${v.isShown}")
+    // Espera o Jieshuo terminar a reação dele à mudança de tela.
+    kotlinx.coroutines.delay(600)
+    if (!v.isShown) { DiagLogBridge.add("$what saiu da tela antes do foco"); return false }
+    if (isA11yFocused(v)) { DiagLogBridge.add("$what já está com o foco"); return true }
+    val ok = v.performAccessibilityAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS, null)
+    DiagLogBridge.add("pedido único de foco em $what: aceita=$ok, na tela=${v.isShown}")
+    if (!ok) return false
+    // Só observa (não devolve o foco) por ~1,5 s, para o relatório mostrar o que o Jieshuo fez.
+    val at = android.os.SystemClock.uptimeMillis()
+    kotlinx.coroutines.delay(1500)
+    return if (isA11yFocused(v)) {
+        DiagLogBridge.add("$what ficou com o foco"); true
+    } else {
+        val moved = log.lastFocusAt > at
+        DiagLogBridge.add("$what: o Jieshuo ${if (moved) "levou o foco para outro item" else "largou o foco"}; o app não insiste")
+        true
     }
-    if (!got) {
-        kotlinx.coroutines.delay(300)
-        got = isA11yFocused(v)
-    }
-    if (!got) { DiagLogBridge.add("$what NÃO ficou com o foco"); return false }
-    // Vigia por ~3 s: se o foco sumir sozinho (sem ir para outro item), devolve; se a pessoa
-    // deslizar para outro item, para de vigiar.
-    val start = now()
-    var restores = 0
-    while (now() - start < 3000 && restores < 4) {
-        kotlinx.coroutines.delay(150)
-        if (isA11yFocused(v) || !v.isShown) continue
-        val lostAt = now()
-        kotlinx.coroutines.delay(350)
-        if (isA11yFocused(v)) continue
-        if (log.lastFocusAt >= lostAt - 200) { DiagLogBridge.add("$what: a pessoa foi para outro item, paro de vigiar"); return true }
-        v.performAccessibilityAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS, null)
-        restores++
-        DiagLogBridge.add("$what perdeu o foco sozinho; devolvido ($restores)")
-    }
-    DiagLogBridge.add("$what ficou com o foco")
-    return true
 }
 
 /** Botão nativo (android.widget.Button) com a aparência dos outros; [onView] recebe a view (ou null ao sair). */
